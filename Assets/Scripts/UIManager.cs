@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Runtime.Serialization.Formatters.Binary;
+using Data;
 using JetBrains.Annotations;
 using TMPro;
 using UnityEngine;
@@ -10,28 +13,32 @@ using UnityEngine.UI;
 
 public class UIManager : MonoBehaviour
 {
-    public MusicManager m_MusicManager;
+    [SerializeField] private MusicManager m_MusicManager;
 
-    public TMP_Dropdown m_ScaleDropdown;
-    public TMP_Dropdown m_ScaleModeDropdown;
-    public TMP_Text m_PlayButtonLabel;
+    [SerializeField] private TMP_Dropdown m_ScaleDropdown;
+    [SerializeField] private TMP_Dropdown m_ScaleModeDropdown;
+    [SerializeField] private TMP_Text m_PlayButtonLabel;
 
-    public Slider m_ChordsSlider;
-    public Slider m_VolumeSlider;
-    public Slider m_BPMSlider;
-    public Slider m_BeatsSlider;
-    public Slider m_TimeSpeedSlider;
+    [SerializeField] private Image m_ThirdsBackground;
 
-    public Toggle m_ThirdsToggle;
+    [SerializeField] private Button m_ReplayButton;
 
-    public Button m_ReplayButton;
+    [SerializeField] private Button m_LoadButton;
+    [SerializeField] private Button m_SaveButton;
+    [SerializeField] private Button m_QuitPlaybackButton;
 
-    public GameObject m_RhythmWeightsPanel;
+    [SerializeField] private GameObject m_RhythmWeightsPanel;
+
+    [SerializeField] private CanvasGroup m_SettingsCanvasGroup;
+    [SerializeField] private TMP_Text m_PlaybackLabel;
 
     private readonly Dictionary<int, string> m_DropdownScales = new Dictionary<int, string>();
 
     private bool m_IsPlaying;
     private bool m_IsReplaying;
+    private bool m_IsPlayback;
+
+    private MusicSequence m_MusicSequencePlayback;
 
     // Events handling
     public delegate void StopAction();
@@ -41,6 +48,8 @@ public class UIManager : MonoBehaviour
     private void Awake()
     {
         m_ReplayButton.interactable = false;
+        m_QuitPlaybackButton.interactable = false;
+        m_PlaybackLabel.enabled = false;
 
         var rhythmWeightSliders = m_RhythmWeightsPanel.GetComponentsInChildren<Slider>();
         var i = 0;
@@ -57,6 +66,17 @@ public class UIManager : MonoBehaviour
             m_ScaleDropdown.options.Add(new TMP_Dropdown.OptionData(n));
             m_DropdownScales.Add(i++, n);
         });
+    }
+
+    private void OnEnable()
+    {
+        MusicManager.OnPlaybackEnd += OnPlaybackEnd;
+    }
+
+
+    private void OnDisable()
+    {
+        MusicManager.OnPlaybackEnd -= OnPlaybackEnd;
     }
 
     private void SetRhythmWeightByIndex(int index, Slider slider)
@@ -80,41 +100,36 @@ public class UIManager : MonoBehaviour
         if (m_IsPlaying) TryReplay();
     }
 
-    [UsedImplicitly]
-    public void SetBpm()
+    public void SetBpm(float newVal)
     {
-        m_MusicManager.m_Bpm = m_BPMSlider.value;
+        m_MusicManager.m_Bpm = newVal;
         if (m_IsPlaying) TryReplay();
     }
 
-    [UsedImplicitly]
-    public void SetChordsProba()
+    public void SetChordsProba(float newVal)
     {
-        m_MusicManager.m_ChordsProba = m_ChordsSlider.value;
+        m_MusicManager.m_ChordsProba = newVal;
     }
 
-    [UsedImplicitly]
-    public void SetVolume()
+    public void SetVolume(float newVal)
     {
-        m_MusicManager.m_DefaultVolume = m_VolumeSlider.value;
+        m_MusicManager.m_DefaultVolume = newVal;
     }
 
-    [UsedImplicitly]
-    public void SetBeatsPerBar()
+    public void SetBeatsPerBar(float newVal)
     {
-        m_MusicManager.m_BeatsPerBar = (int) m_BeatsSlider.value;
+        m_MusicManager.m_BeatsPerBar = (int) newVal;
     }
 
-    [UsedImplicitly]
-    public void SetTimeSpeed()
+    public void SetTimeSpeed(float newVal)
     {
-        m_MusicManager.m_TimeMultiplier = m_TimeSpeedSlider.value;
+        m_MusicManager.m_TimeMultiplier = newVal;
     }
 
-    [UsedImplicitly]
     public void SetThirds(bool active)
     {
         m_MusicManager.m_EnableThirds = active;
+        m_ThirdsBackground.color = active ? Color.cyan : Color.white;
     }
 
     public void TogglePlay(bool silentLabel = false)
@@ -129,14 +144,15 @@ public class UIManager : MonoBehaviour
         // Playing
         else
         {
-            // Update label if needed
-            if (!silentLabel) m_PlayButtonLabel.text = m_IsPlaying ? "Stop" : "Play";
-            m_MusicManager.Play();
+            if (m_IsPlayback) m_MusicManager.m_CurrentMusicSequence = m_MusicSequencePlayback;
+            m_MusicManager.Play(m_IsPlayback);
             m_ReplayButton.interactable = true;
         }
+
+        // Update label if needed
+        if (!silentLabel) m_PlayButtonLabel.text = m_IsPlaying ? "Stop" : "Play";
     }
 
-    [UsedImplicitly]
     public void Replay()
     {
         if (!m_IsPlaying) return;
@@ -158,5 +174,64 @@ public class UIManager : MonoBehaviour
         yield return new WaitForSeconds(0.5f);
         TogglePlay(true);
         m_IsReplaying = false;
+    }
+
+    public void Save()
+    {
+        string destination = Application.persistentDataPath + "/save.dat";
+        FileStream file = File.Exists(destination) ? File.OpenWrite(destination) : File.Create(destination);
+        var bf = new BinaryFormatter();
+        bf.Serialize(file, m_MusicManager.m_CurrentMusicSequence);
+        file.Close();
+        print("OK saved!"); // TODO
+    }
+
+    public void Load()
+    {
+        string destination = Application.persistentDataPath + "/save.dat";
+        FileStream file;
+
+        if (File.Exists(destination)) file = File.OpenRead(destination);
+        else
+        {
+            Debug.LogError("File not found");
+            return;
+        }
+
+        var bf = new BinaryFormatter();
+        m_MusicSequencePlayback = (MusicSequence) bf.Deserialize(file);
+        file.Close();
+        m_IsPlayback = true;
+        m_LoadButton.interactable = false;
+        m_SaveButton.interactable = false;
+        m_QuitPlaybackButton.interactable = true;
+        m_SettingsCanvasGroup.alpha = 0.2f;
+        m_SettingsCanvasGroup.interactable = false;
+        m_PlaybackLabel.enabled = true;
+        if (!m_IsPlaying)
+        {
+            TogglePlay();
+        }
+        else
+        {
+            Replay();
+        }
+    }
+
+    public void QuitPlayback()
+    {
+        if (m_IsPlaying) TogglePlay();
+        m_IsPlayback = false;
+        m_LoadButton.interactable = true;
+        m_SaveButton.interactable = true;
+        m_QuitPlaybackButton.interactable = false;
+        m_SettingsCanvasGroup.alpha = 1;
+        m_SettingsCanvasGroup.interactable = true;
+        m_PlaybackLabel.enabled = false;
+    }
+
+    private void OnPlaybackEnd()
+    {
+        TogglePlay();
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using Data;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -37,6 +38,12 @@ public class MusicManager : MonoBehaviour
 
     private IEnumerator m_PlayMelodyCoroutine;
 
+    [HideInInspector] public MusicSequence m_CurrentMusicSequence;
+    private MusicUnit m_CurrentMusicUnit;
+    private int m_CurrentPlaybackMusicUnitIndex;
+
+    private bool m_IsPlayback;
+
     // Events handling
     public delegate void StopAction();
 
@@ -44,15 +51,29 @@ public class MusicManager : MonoBehaviour
 
     public delegate void PulseAction();
 
+    public delegate void PlaybackEndAction();
+
     public static event StopAction OnStop;
     public static event FirstBeatAction OnFirstBeat;
     public static event PulseAction OnPulse;
+
+    public static event PlaybackEndAction OnPlaybackEnd;
 
     private void Awake()
     {
         m_Rhythms = GetComponent<Rhythms>();
         m_Bpm = 120.0f;
         m_NextWait = 1;
+
+        m_CurrentMusicSequence = new MusicSequence
+        {
+            m_Bpm = m_Bpm,
+            m_Scale = m_Scale,
+            m_DefaultVolume = m_DefaultVolume,
+            m_TimeMultiplier = m_TimeMultiplier,
+            m_BeatsPerBar = m_BeatsPerBar,
+            m_MusicUnits = new List<MusicUnit>(),
+        };
     }
 
     private void Start()
@@ -104,11 +125,34 @@ public class MusicManager : MonoBehaviour
         m_CurrentRhythmPos = 0;
     }
 
-    public void Play()
+    public void Play(bool isPlayback = false)
     {
         KeepScaleOscillators();
         Stop();
+        m_IsPlayback = isPlayback;
         m_PlayMelodyCoroutine = PlayMelody();
+
+        if (!m_IsPlayback)
+        {
+            m_CurrentMusicSequence = new MusicSequence
+            {
+                m_Bpm = m_Bpm,
+                m_Scale = m_Scale,
+                m_DefaultVolume = m_DefaultVolume,
+                m_TimeMultiplier = m_TimeMultiplier,
+                m_BeatsPerBar = m_BeatsPerBar,
+                m_MusicUnits = new List<MusicUnit>(),
+            };
+        }
+        else
+        {
+            m_Bpm = m_CurrentMusicSequence.m_Bpm;
+            m_Scale = m_CurrentMusicSequence.m_Scale;
+            m_DefaultVolume = m_CurrentMusicSequence.m_DefaultVolume;
+            m_TimeMultiplier = m_CurrentMusicSequence.m_TimeMultiplier;
+            m_BeatsPerBar = m_CurrentMusicSequence.m_BeatsPerBar;
+        }
+
         StartCoroutine(m_PlayMelodyCoroutine);
     }
 
@@ -173,31 +217,100 @@ public class MusicManager : MonoBehaviour
 
         m_KeepPlaying = true;
 
-        // Pick up first a random rhythm
-        m_CurrentRhythm = m_Rhythms.m_Rhythms[m_Rhythms.GetRandomWeightedIndex()];
+        if (m_IsPlayback)
+        {
+            m_CurrentPlaybackMusicUnitIndex = 0;
+            if (m_CurrentMusicSequence.m_MusicUnits.Count == 0)
+            {
+                m_KeepPlaying = false;
+                if (OnPlaybackEnd != null) OnPlaybackEnd();
+                yield break;
+            }
+
+            m_CurrentMusicUnit = m_CurrentMusicSequence.m_MusicUnits[m_CurrentPlaybackMusicUnitIndex];
+            m_CurrentRhythm = m_CurrentMusicUnit.m_Rhythm;
+        }
+        else
+        {
+            // Pick up first a random rhythm
+            m_CurrentRhythm = m_Rhythms.m_Rhythms[m_Rhythms.GetRandomWeightedIndex()];
+
+            // Set up saving data
+            m_CurrentMusicUnit = new MusicUnit
+            {
+                m_Rhythm = m_CurrentRhythm,
+                m_Notes = new List<int>[m_CurrentRhythm.Length]
+            };
+            m_CurrentMusicSequence.m_MusicUnits.Add(m_CurrentMusicUnit);
+        }
 
         while (m_KeepPlaying)
         {
             // Calculate next rhythm wait time
             m_NextWait = m_CurrentRhythm[m_CurrentRhythmPos] * m_WaitTimeForA16Th;
 
-            // Calculate next note
-            if (Mathf.Approximately(m_PerlinNoise, 0f)) m_PerlinNoise = 1f;
+            float duration = m_NextWait / 2;
+            bool firstBeat = m_BeatCounter == 0;
+            if (!m_IsPlayback)
+            {
+                // Calculate next note
+                if (Mathf.Approximately(m_PerlinNoise, 0f)) m_PerlinNoise = 1f;
 
-            int nextNote = ((int) Mathf.Ceil(m_PerlinNoise * m_NotesNb)) - 1;
-            // Ensure we stay inside boundaries
-            if (nextNote < 0) nextNote = 0;
+                int nextNote = ((int) Mathf.Ceil(m_PerlinNoise * m_NotesNb)) - 1;
+                // Ensure we stay inside boundaries
+                if (nextNote < 0) nextNote = 0;
 
-            // Play note(s)
-            PlayNotes(nextNote, m_NextWait / 2, m_BeatCounter == 0);
+                // Play note(s)
+                PlayNotes(nextNote, duration, firstBeat);
+            }
+            else
+            {
+                if (m_CurrentMusicUnit.m_Notes[m_CurrentRhythmPos] == null)
+                {
+                    m_KeepPlaying = false;
+                    if (OnPlaybackEnd != null) OnPlaybackEnd();
+                    break;
+                }
+
+                m_CurrentMusicUnit.m_Notes[m_CurrentRhythmPos].ForEach(note => PlayNote(note, duration, firstBeat));
+            }
+
+
             // -------------
 
             m_CurrentRhythmPos++;
             // End of rhythm, we need to pick up a new rhythm
             if (m_CurrentRhythmPos >= m_CurrentRhythm.Length)
             {
-                m_CurrentRhythm = m_Rhythms.m_Rhythms[m_Rhythms.GetRandomWeightedIndex()];
+                if (m_IsPlayback)
+                {
+                    m_CurrentPlaybackMusicUnitIndex++;
+                    if (m_CurrentMusicSequence.m_MusicUnits.Count == m_CurrentPlaybackMusicUnitIndex)
+                    {
+                        m_KeepPlaying = false;
+                        if (OnPlaybackEnd != null) OnPlaybackEnd();
+                        break;
+                    }
+
+                    m_CurrentMusicUnit = m_CurrentMusicSequence.m_MusicUnits[m_CurrentPlaybackMusicUnitIndex];
+                    m_CurrentRhythm = m_CurrentMusicUnit.m_Rhythm;
+                }
+                else
+                {
+                    m_CurrentRhythm = m_Rhythms.m_Rhythms[m_Rhythms.GetRandomWeightedIndex()];
+                }
+
                 m_CurrentRhythmPos = 0;
+
+                if (!m_IsPlayback)
+                {
+                    m_CurrentMusicUnit = new MusicUnit
+                    {
+                        m_Rhythm = m_CurrentRhythm,
+                        m_Notes = new List<int>[m_CurrentRhythm.Length]
+                    };
+                    m_CurrentMusicSequence.m_MusicUnits.Add(m_CurrentMusicUnit);
+                }
 
                 // Increment beat as well
                 m_BeatCounter++;
@@ -210,6 +323,11 @@ public class MusicManager : MonoBehaviour
 
     private void PlayNotes(int mainNoteIndex, float duration, bool firstBeat)
     {
+        if (!m_IsPlayback)
+        {
+            m_CurrentMusicUnit.m_Notes[m_CurrentRhythmPos] = new List<int>();
+        }
+
         // Main, always
         PlayNote(mainNoteIndex, duration, firstBeat);
 
@@ -249,5 +367,10 @@ public class MusicManager : MonoBehaviour
         m_NotesEmitter.EmitNote(noteIndex, m_Oscillators.Count);
         if (firstBeat && m_CurrentRhythmPos == 0 && OnFirstBeat != null) OnFirstBeat();
         else if (m_CurrentRhythmPos == 0 && OnPulse != null) OnPulse();
+
+        if (!m_IsPlayback)
+        {
+            m_CurrentMusicUnit.m_Notes[m_CurrentRhythmPos].Add(noteIndex);
+        }
     }
 }
