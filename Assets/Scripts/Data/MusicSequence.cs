@@ -12,6 +12,6 @@ namespace Data
         public float m_DefaultVolume;
         public float m_TimeMultiplier;
 
-        public List<MusicUnit> m_MusicUnits;
+        public Queue<MusicUnit> m_MusicUnits;
     }
 }

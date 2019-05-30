@@ -5,15 +5,14 @@ using System.IO;
 using System.Linq;
 using System.Runtime.Serialization.Formatters.Binary;
 using Data;
-using JetBrains.Annotations;
 using TMPro;
 using UnityEngine;
-using UnityEngine.Events;
 using UnityEngine.UI;
 
 public class UIManager : MonoBehaviour
 {
     [SerializeField] private MusicManager m_MusicManager;
+    [SerializeField] private ToasterManager m_ToasterManager;
 
     [SerializeField] private TMP_Dropdown m_ScaleDropdown;
     [SerializeField] private TMP_Dropdown m_ScaleModeDropdown;
@@ -30,9 +29,14 @@ public class UIManager : MonoBehaviour
     [SerializeField] private GameObject m_RhythmWeightsPanel;
 
     [SerializeField] private CanvasGroup m_SettingsCanvasGroup;
+    [SerializeField] private CanvasGroup m_LoadSaveCanvasGroup;
     [SerializeField] private TMP_Text m_PlaybackLabel;
 
+    [SerializeField] private TMP_Text m_LastSaveLabel;
+
     private readonly Dictionary<int, string> m_DropdownScales = new Dictionary<int, string>();
+
+    private GameObject m_QuitPlaybackButtonGameObject;
 
     private bool m_IsPlaying;
     private bool m_IsReplaying;
@@ -51,6 +55,8 @@ public class UIManager : MonoBehaviour
         m_QuitPlaybackButton.interactable = false;
         m_PlaybackLabel.enabled = false;
 
+        m_QuitPlaybackButtonGameObject = m_QuitPlaybackButton.gameObject;
+
         var rhythmWeightSliders = m_RhythmWeightsPanel.GetComponentsInChildren<Slider>();
         var i = 0;
         rhythmWeightSliders.ToList().ForEach(slider => SetRhythmWeightByIndex(i++, slider));
@@ -66,6 +72,17 @@ public class UIManager : MonoBehaviour
             m_ScaleDropdown.options.Add(new TMP_Dropdown.OptionData(n));
             m_DropdownScales.Add(i++, n);
         });
+
+        string destination = Application.persistentDataPath + "/save.dat";
+        if (!File.Exists(destination))
+        {
+            m_LoadButton.interactable = false;
+            m_LastSaveLabel.text = "Last save: none";
+        }
+        else
+        {
+            m_LastSaveLabel.text = "Last save: " + string.Format("{0:g}", File.GetLastWriteTime(destination));
+        }
     }
 
     private void OnEnable()
@@ -132,6 +149,11 @@ public class UIManager : MonoBehaviour
         m_ThirdsBackground.color = active ? Color.cyan : Color.white;
     }
 
+    public void SetSecondsToSave(float newVal)
+    {
+        m_MusicManager.m_SecondsToKeep = (int) newVal;
+    }
+
     public void TogglePlay(bool silentLabel = false)
     {
         m_IsPlaying = !m_IsPlaying;
@@ -183,7 +205,9 @@ public class UIManager : MonoBehaviour
         var bf = new BinaryFormatter();
         bf.Serialize(file, m_MusicManager.m_CurrentMusicSequence);
         file.Close();
-        print("OK saved!"); // TODO
+        m_ToasterManager.ShowToast("Saved!");
+        m_LastSaveLabel.text = "Last save: " + string.Format("{0:g}", File.GetLastWriteTime(destination));
+        m_LoadButton.interactable = true;
     }
 
     public void Load()
@@ -194,20 +218,25 @@ public class UIManager : MonoBehaviour
         if (File.Exists(destination)) file = File.OpenRead(destination);
         else
         {
-            Debug.LogError("File not found");
+            m_ToasterManager.ShowToast("Save not found!");
             return;
         }
 
         var bf = new BinaryFormatter();
         m_MusicSequencePlayback = (MusicSequence) bf.Deserialize(file);
         file.Close();
+
+        // Begin Playback
         m_IsPlayback = true;
         m_LoadButton.interactable = false;
         m_SaveButton.interactable = false;
+        m_QuitPlaybackButtonGameObject.SetActive(true);
         m_QuitPlaybackButton.interactable = true;
         m_SettingsCanvasGroup.alpha = 0.2f;
         m_SettingsCanvasGroup.interactable = false;
         m_PlaybackLabel.enabled = true;
+        m_LoadSaveCanvasGroup.alpha = 0;
+        m_LoadSaveCanvasGroup.interactable = false;
         if (!m_IsPlaying)
         {
             TogglePlay();
@@ -224,10 +253,13 @@ public class UIManager : MonoBehaviour
         m_IsPlayback = false;
         m_LoadButton.interactable = true;
         m_SaveButton.interactable = true;
+        m_QuitPlaybackButtonGameObject.SetActive(false);
         m_QuitPlaybackButton.interactable = false;
         m_SettingsCanvasGroup.alpha = 1;
         m_SettingsCanvasGroup.interactable = true;
         m_PlaybackLabel.enabled = false;
+        m_LoadSaveCanvasGroup.alpha = 1;
+        m_LoadSaveCanvasGroup.interactable = true;
     }
 
     private void OnPlaybackEnd()

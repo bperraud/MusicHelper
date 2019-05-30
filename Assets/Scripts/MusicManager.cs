@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using Data;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -14,10 +15,11 @@ public class MusicManager : MonoBehaviour
     [HideInInspector] public float m_DefaultVolume = 0.1f;
     [HideInInspector] public float m_TimeMultiplier = 1;
     [HideInInspector] public bool m_EnableThirds;
+    [HideInInspector] public int m_SecondsToKeep = 5;
 
     [HideInInspector] public Rhythms m_Rhythms;
 
-    private const float FirstBeatVolumeOffset = 0.15f;
+    private const float FirstBeatVolumeOffset = 0.1f;
 
     public NotesEmitter m_NotesEmitter;
 
@@ -41,6 +43,7 @@ public class MusicManager : MonoBehaviour
     [HideInInspector] public MusicSequence m_CurrentMusicSequence;
     private MusicUnit m_CurrentMusicUnit;
     private int m_CurrentPlaybackMusicUnitIndex;
+    [HideInInspector] public int m_MaxMusicUnitsToKeep;
 
     private bool m_IsPlayback;
 
@@ -72,7 +75,7 @@ public class MusicManager : MonoBehaviour
             m_DefaultVolume = m_DefaultVolume,
             m_TimeMultiplier = m_TimeMultiplier,
             m_BeatsPerBar = m_BeatsPerBar,
-            m_MusicUnits = new List<MusicUnit>(),
+            m_MusicUnits = new Queue<MusicUnit>(),
         };
     }
 
@@ -141,8 +144,13 @@ public class MusicManager : MonoBehaviour
                 m_DefaultVolume = m_DefaultVolume,
                 m_TimeMultiplier = m_TimeMultiplier,
                 m_BeatsPerBar = m_BeatsPerBar,
-                m_MusicUnits = new List<MusicUnit>(),
+                m_MusicUnits = new Queue<MusicUnit>(),
             };
+
+            float barsPerMin = m_Bpm / m_BeatsPerBar;
+            float barsPerSec = barsPerMin / 60;
+            int barsToKeep = Mathf.CeilToInt(barsPerSec * m_SecondsToKeep);
+            m_MaxMusicUnitsToKeep = barsToKeep * m_BeatsPerBar;
         }
         else
         {
@@ -227,7 +235,7 @@ public class MusicManager : MonoBehaviour
                 yield break;
             }
 
-            m_CurrentMusicUnit = m_CurrentMusicSequence.m_MusicUnits[m_CurrentPlaybackMusicUnitIndex];
+            m_CurrentMusicUnit = m_CurrentMusicSequence.m_MusicUnits.ToList()[m_CurrentPlaybackMusicUnitIndex];
             m_CurrentRhythm = m_CurrentMusicUnit.m_Rhythm;
         }
         else
@@ -241,7 +249,9 @@ public class MusicManager : MonoBehaviour
                 m_Rhythm = m_CurrentRhythm,
                 m_Notes = new List<int>[m_CurrentRhythm.Length]
             };
-            m_CurrentMusicSequence.m_MusicUnits.Add(m_CurrentMusicUnit);
+            m_CurrentMusicSequence.m_MusicUnits.Enqueue(m_CurrentMusicUnit);
+            if (m_CurrentMusicSequence.m_MusicUnits.Count >= m_MaxMusicUnitsToKeep)
+                m_CurrentMusicSequence.m_MusicUnits.Dequeue();
         }
 
         while (m_KeepPlaying)
@@ -292,7 +302,7 @@ public class MusicManager : MonoBehaviour
                         break;
                     }
 
-                    m_CurrentMusicUnit = m_CurrentMusicSequence.m_MusicUnits[m_CurrentPlaybackMusicUnitIndex];
+                    m_CurrentMusicUnit = m_CurrentMusicSequence.m_MusicUnits.ToList()[m_CurrentPlaybackMusicUnitIndex];
                     m_CurrentRhythm = m_CurrentMusicUnit.m_Rhythm;
                 }
                 else
@@ -309,7 +319,9 @@ public class MusicManager : MonoBehaviour
                         m_Rhythm = m_CurrentRhythm,
                         m_Notes = new List<int>[m_CurrentRhythm.Length]
                     };
-                    m_CurrentMusicSequence.m_MusicUnits.Add(m_CurrentMusicUnit);
+                    m_CurrentMusicSequence.m_MusicUnits.Enqueue(m_CurrentMusicUnit);
+                    if (m_CurrentMusicSequence.m_MusicUnits.Count >= m_MaxMusicUnitsToKeep)
+                        m_CurrentMusicSequence.m_MusicUnits.Dequeue();
                 }
 
                 // Increment beat as well
