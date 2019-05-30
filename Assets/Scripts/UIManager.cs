@@ -51,6 +51,8 @@ public class UIManager : MonoBehaviour
 
     private void Awake()
     {
+        Screen.fullScreen = false;
+
         m_ReplayButton.interactable = false;
         m_QuitPlaybackButton.interactable = false;
         m_PlaybackLabel.enabled = false;
