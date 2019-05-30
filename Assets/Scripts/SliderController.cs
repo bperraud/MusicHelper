@@ -20,7 +20,14 @@ public class SliderController : MonoBehaviour, IEndDragHandler, IPointerDownHand
 
     private void Update()
     {
-        if (m_SliderGameObject.activeSelf && m_IsDragging)
+        if (!m_SliderGameObject.activeSelf || !m_IsDragging) return;
+
+        if (!m_Slider.wholeNumbers)
+        {
+            int val = Mathf.RoundToInt(m_Slider.value / m_Slider.maxValue * 100);
+            m_SliderValueText.text = val.ToString();
+        }
+        else
         {
             m_SliderValueText.text = m_Slider.value.ToString("G");
         }
